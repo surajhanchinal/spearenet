@@ -115,7 +115,7 @@ class TransformerModel:
         return logits
     
     @TinyJit
-    def internal_generate(self,x:Tensor,y:Tensor) -> Tensor:
+    def internal_generate(self,x:Tensor) -> Tensor:
         logits = self(x)
         logits = logits[0, -1, :] # becomes (B, C)
         probs = Tensor.softmax(logits,axis=-1) # (B, C)
@@ -139,9 +139,8 @@ class TransformerModel:
         toks = np.zeros((1,max_new_tokens+block_size))
         cur_p = block_size
         for i in (t:=trange(max_new_tokens-1)):
-            xv,yv = get_batch('val')
             x = Tensor(toks[:,cur_p-block_size:cur_p])
-            idx_next = self.internal_generate(x,yv.realize())
+            idx_next = self.internal_generate(x)
             cur_p = cur_p + 1
             toks[0,cur_p] = idx_next.item()
         return toks
