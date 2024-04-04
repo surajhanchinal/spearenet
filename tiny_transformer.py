@@ -12,7 +12,7 @@ dropout = 0.0
 batch_size = 16
 block_size = 32
 n_layers = 4
-max_iters = 100
+max_iters = 1000
 
 with open('input.txt', 'r', encoding='utf-8') as f:
     text = f.read()
@@ -46,7 +46,7 @@ class Head:
         self.key = nn.Linear(n_embeds,head_size,bias=False)
         self.query = nn.Linear(n_embeds,head_size,bias=False)
         self.value = nn.Linear(n_embeds,head_size,bias=False)
-        self.tril = Tensor.ones(block_size,block_size).tril(block_size)
+        self.tril = Tensor.ones(block_size,block_size).tril(0)
         self.tril.requires_grad = False
 
     def __call__(self,x:Tensor):
@@ -54,8 +54,8 @@ class Head:
         k = self.key(x)
         q = self.query(x)
         v = self.value(x)
-        weights = q.matmul(k.transpose(-2,-1)) * (C**-0.5)
-        weights = Tensor.where(self.tril, weights, -1e4)
+        weights = q.matmul(k.transpose(-2,-1)).mul(C**-0.5)
+        weights = Tensor.where(self.tril, weights, -1e10)
         weights = weights.softmax()
         return weights.matmul(v).dropout(dropout)
     
@@ -137,15 +137,16 @@ class TransformerModel:
         opt.step()
         return loss.realize()
 
-
     def generate(self, idx, max_new_tokens):
         toks = np.zeros((1,max_new_tokens+block_size))
+        toks[0,:block_size] = idx
         cur_p = block_size
         for i in (t:=trange(max_new_tokens-1)):
-            x = Tensor(toks[:,cur_p-block_size:cur_p])
-            idx_next = self.internal_generate(x)
+            tts = toks[:,cur_p-block_size:cur_p]
+            x = Tensor(tts)
+            idx_next = self.internal_generate(x).item()
+            toks[0,cur_p] = idx_next
             cur_p = cur_p + 1
-            toks[0,cur_p] = idx_next.item()
         return toks
     
 
@@ -154,7 +155,7 @@ if __name__ == "__main__":
     model = TransformerModel(vocab_size)
     parameters = nn.state.get_parameters(model)
     
-    opt = nn.optim.AdamW(parameters)
+    opt = nn.optim.AdamW(parameters,lr=1e-3)
     tarange = Tensor.arange(vocab_size)
     tarange.requires_grad = False
 
@@ -162,24 +163,25 @@ if __name__ == "__main__":
         with Tensor.train():
             x,y = get_batch('train')
             x_train = Tensor(x,requires_grad=False)
-            y_train = Tensor(y,requires_grad=False)
+            y_train = Tensor(y)
             loss = model.get_loss(x_train.realize(),y_train.realize())
             return loss
         
     def get_test_acc() -> Tensor:
         xv,yv = get_batch('val')
         x_val = Tensor(xv,requires_grad=False)
-        y_val = Tensor(yv,requires_grad=False)
+        y_val = Tensor(yv)
         return model.get_loss(x_val.realize(),y_val.realize())
 
     test_acc = float('nan')
-    for i in (t:=trange(1000)):
+    for i in (t:=trange(max_iters)):
         GlobalCounters.reset()   # NOTE: this makes it nice for DEBUG=2 timing
         loss = train_step()
         if i%10 == 9: test_acc = get_test_acc().item()
         t.set_description(f"training loss: {loss.item():.4f} validation loss: {test_acc:.4f} {GlobalCounters.mem_used}")
 
-    xc,yc = get_batch('val')
-    answer = model.generate(xc,2000)
+    xc,yc = get_batch('test')
+    answer = model.generate(xc[0],2000)
     alist = [int(x) for x in answer[0].tolist()]
-    print(''.join(decode(alist)))
+    prediction = ''.join(decode(alist))
+    print(prediction)

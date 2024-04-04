@@ -33,7 +33,7 @@ block_size = 32
 batch_size = 16
 eval_iters = 200
 eval_interval = 100
-max_iters = 1000
+max_iters = 5000
 
 def get_batch(split):
     data = train_data if split == 'train' else val_data
