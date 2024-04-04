@@ -12,6 +12,7 @@ dropout = 0.0
 batch_size = 16
 block_size = 32
 n_layers = 4
+max_iters = 100
 
 with open('input.txt', 'r', encoding='utf-8') as f:
     text = f.read()
@@ -25,7 +26,7 @@ encode = lambda s: [stoi[c] for c in s]
 decode = lambda l: [itos[i] for i in l]
 
 
-data = Tensor(encode(text),requires_grad=False)
+data = np.array(encode(text))
 print(data.shape)
 # Let's now split up the data into train and validation sets
 n = int(0.9*data.shape[0]) # first 90% will be train, rest val
@@ -36,10 +37,9 @@ def get_batch(split) -> Tuple[Tensor,Tensor]:
     data = train_data if split == 'train' else val_data
     #idx = Tensor.randint(block_size,low=0,high=data.shape[0]-block_size)
     idx = np.random.randint(0,data.shape[0] - block_size,batch_size)
-    x = Tensor.stack([data[i:i+block_size] for i in idx])
-    y = Tensor.stack([data[i+1:i+block_size+1] for i in idx])
+    x = np.stack([data[i:i+block_size] for i in idx])
+    y = np.stack([data[i+1:i+block_size+1] for i in idx])
     return x,y
-
 
 class Head:
     def __init__(self):
@@ -132,7 +132,10 @@ class TransformerModel:
         
         mask = y.unsqueeze(1) == tarange
         loss = -(mask*probs).sum().div(B*T)
-        return loss
+        opt.zero_grad()
+        loss.backward()
+        opt.step()
+        return loss.realize()
 
 
     def generate(self, idx, max_new_tokens):
@@ -157,19 +160,23 @@ if __name__ == "__main__":
 
     def train_step() -> Tensor:
         with Tensor.train():
-            xt,yt = get_batch('train')
-            loss = model.get_loss(xt.realize(),yt.realize())
+            x,y = get_batch('train')
+            x_train = Tensor(x,requires_grad=False)
+            y_train = Tensor(y,requires_grad=False)
+            loss = model.get_loss(x_train.realize(),y_train.realize())
             return loss
         
     def get_test_acc() -> Tensor:
         xv,yv = get_batch('val')
-        return model.get_loss(xv.realize(),yv.realize())
+        x_val = Tensor(xv,requires_grad=False)
+        y_val = Tensor(yv,requires_grad=False)
+        return model.get_loss(x_val.realize(),y_val.realize())
 
     test_acc = float('nan')
     for i in (t:=trange(1000)):
         GlobalCounters.reset()   # NOTE: this makes it nice for DEBUG=2 timing
         loss = train_step()
-        #if i%10 == 9: test_acc = get_test_acc().item()
+        if i%10 == 9: test_acc = get_test_acc().item()
         t.set_description(f"training loss: {loss.item():.4f} validation loss: {test_acc:.4f} {GlobalCounters.mem_used}")
 
     xc,yc = get_batch('val')
