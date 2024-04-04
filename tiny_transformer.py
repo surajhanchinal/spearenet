@@ -55,6 +55,7 @@ class Head:
         q = self.query(x)
         v = self.value(x)
         weights = q.matmul(k.transpose(-2,-1)) * (C**-0.5)
+        weights = Tensor.where(self.tril, weights, -1e4)
         weights = weights.softmax()
         return weights.matmul(v).dropout(dropout)
     
@@ -161,14 +162,14 @@ if __name__ == "__main__":
 
     
     test_acc = float('nan')
-    for i in (t:=trange(100)):
+    for i in (t:=trange(5000)):
         GlobalCounters.reset()   # NOTE: this makes it nice for DEBUG=2 timing
         loss = train_step()
         if i%10 == 9: test_acc = get_test_acc().item()
         t.set_description(f"training loss: {loss.item():.4f} validation loss: {test_acc:.4f} {GlobalCounters.mem_used}")
 
 
-    #xc,yc = get_batch('val')
-    #answer = model.generate(xc,10)
-    #alist = [int(x) for x in answer[0].tolist()]
-    #print(''.join(decode(alist)))
+    xc,yc = get_batch('val')
+    answer = model.generate(xc,2000)
+    alist = [int(x) for x in answer[0].tolist()]
+    print(''.join(decode(alist)))
