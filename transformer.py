@@ -6,8 +6,8 @@ from torch.nn import functional as F
 dropout = 0.0
 n_embed = 64
 n_heads = 4
-block_size = 64
-batch_size = 64
+block_size = 32
+batch_size = 16
 n_layers = 4
 
 

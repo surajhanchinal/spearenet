@@ -29,8 +29,8 @@ train_data = data[:n]
 val_data = data[n:]
 
 
-block_size = 64
-batch_size = 64
+block_size = 32
+batch_size = 16
 eval_iters = 200
 eval_interval = 100
 max_iters = 1000

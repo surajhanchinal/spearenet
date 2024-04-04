@@ -95,7 +95,6 @@ class Block:
         x = x + self.ffw(self.ln2(x))
         return x
 
-
 class TransformerModel:
     def __init__(self,vocab_size):
         self.token_embedding_table = nn.Embedding(vocab_size,n_embeds)
@@ -114,17 +113,37 @@ class TransformerModel:
         x = self.ln(x)
         logits = self.fc(x)
         return logits
+    
+    @TinyJit
+    def internal_generate(self,x:Tensor,y:Tensor) -> Tensor:
+        logits = self(x)
+        logits = logits[0, -1, :] # becomes (B, C)
+        probs = Tensor.softmax(logits,axis=-1) # (B, C)
+        idx_next = Tensor.multinomial(probs, num_samples=1) # (B, 1)
+        return idx_next.realize()
+    
+    @TinyJit
+    def get_loss(self,x:Tensor,y:Tensor) -> Tensor:
+        logits = model(x)
+        B,T,C = logits.shape
+        logits = logits.reshape(B*T,C)
+        probs = logits.log_softmax(axis=-1)
+        y = y.reshape(B*T)
+        
+        mask = y.unsqueeze(1) == tarange
+        loss = -(mask*probs).sum().div(B*T)
+        return loss
+
 
     def generate(self, idx, max_new_tokens):
-        toks = np.zeros((1,block_size))
-        for i in range(max_new_tokens):
-            print(i)
-            x = Tensor(toks[:,-block_size:])
-            logits = self(x)
-            logits = logits[0, -1, :] # becomes (B, C)
-            probs = Tensor.softmax(logits,axis=-1) # (B, C)
-            idx_next = Tensor.multinomial(probs, num_samples=1) # (B, 1)
-            toks = np.append(toks,[idx_next.item()]).reshape((1,-1))
+        toks = np.zeros((1,max_new_tokens+block_size))
+        cur_p = block_size
+        for i in (t:=trange(max_new_tokens-1)):
+            xv,yv = get_batch('val')
+            x = Tensor(toks[:,cur_p-block_size:cur_p])
+            idx_next = self.internal_generate(x,yv.realize())
+            cur_p = cur_p + 1
+            toks[0,cur_p] = idx_next.item()
         return toks
     
 
@@ -136,38 +155,23 @@ if __name__ == "__main__":
     opt = nn.optim.AdamW(parameters)
     tarange = Tensor.arange(vocab_size)
     tarange.requires_grad = False
-    def get_loss(x:Tensor,y:Tensor) -> Tensor:
-        logits = model(x)
-        B,T,C = logits.shape
-        logits = logits.reshape(B*T,C)
-        probs = logits.log_softmax(axis=-1)
-        y = y.reshape(B*T)
-        
-        mask = y.unsqueeze(1) == tarange
-        loss = -(mask*probs).sum().div(B*T)
-        return loss
 
     def train_step() -> Tensor:
         with Tensor.train():
             xt,yt = get_batch('train')
-            loss = get_loss(xt,yt)
-            opt.zero_grad()
-            loss.backward()
-            opt.step()
+            loss = model.get_loss(xt.realize(),yt.realize())
             return loss
         
     def get_test_acc() -> Tensor:
         xv,yv = get_batch('val')
-        return get_loss(xv,yv)
+        return model.get_loss(xv.realize(),yv.realize())
 
-    
     test_acc = float('nan')
-    for i in (t:=trange(5000)):
+    for i in (t:=trange(1000)):
         GlobalCounters.reset()   # NOTE: this makes it nice for DEBUG=2 timing
         loss = train_step()
-        if i%10 == 9: test_acc = get_test_acc().item()
+        #if i%10 == 9: test_acc = get_test_acc().item()
         t.set_description(f"training loss: {loss.item():.4f} validation loss: {test_acc:.4f} {GlobalCounters.mem_used}")
-
 
     xc,yc = get_batch('val')
     answer = model.generate(xc,2000)
